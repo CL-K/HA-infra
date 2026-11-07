@@ -2,41 +2,41 @@
 # ============================================================
 # set-domain.sh
 #
-# Remplace le domaine placeholder "domain.com" par le domaine
-# fourni en parametre dans tous les fichiers du projet qui
-# l'utilisent (Ansible playbooks + README).
+# Replaces the placeholder domain "domain.com" with the domain
+# given as a parameter in all the project files that
+# use it (Ansible playbooks + README).
 #
-# Fichiers concernes :
+# Files concerned:
 #   - ansible/playbooks/install-argocd.yml       (argocd_hostname)
-#   - ansible/playbooks/install-monitoring.yml   (host Ingress Grafana)
+#   - ansible/playbooks/install-monitoring.yml   (Grafana Ingress host)
 #   - ansible/playbooks/guestbook.yml            (argocd_hostname)
-#   - ansible/playbooks/install-cert-manager.yml (email par defaut, doc)
-#   - ansible/site.yml                            (commentaire doc)
-#   - README.md                                   (doc)
+#   - ansible/playbooks/install-cert-manager.yml (default email, docs)
+#   - ansible/site.yml                            (doc comment)
+#   - README.md                                   (docs)
 #
-# Usage (depuis n'importe quel dossier, le script se repere lui-meme) :
-#   ./scripts/set-domain.sh mondomaine.fr
+# Usage (from any folder, the script locates itself):
+#   ./scripts/set-domain.sh mydomain.com
 #
-# Une sauvegarde .bak est creee a cote de chaque fichier modifie.
+# A .bak backup is created next to each modified file.
 # ============================================================
 set -euo pipefail
 
 if [ $# -ne 1 ]; then
-  echo "Usage : $0 <domaine>" >&2
-  echo "Exemple : $0 mondomaine.fr" >&2
+  echo "Usage: $0 <domain>" >&2
+  echo "Example: $0 mydomain.com" >&2
   exit 1
 fi
 
 NEW_DOMAIN="$1"
 OLD_DOMAIN="domain.com"
 
-# Validation simple du format de domaine (label.label...)
+# Simple domain format validation (label.label...)
 if ! [[ "$NEW_DOMAIN" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$ ]]; then
-  echo "Erreur : '$NEW_DOMAIN' ne ressemble pas a un domaine valide (ex: mondomaine.fr)." >&2
+  echo "Error: '$NEW_DOMAIN' does not look like a valid domain (e.g. mydomain.com)." >&2
   exit 1
 fi
 
-# Le script vit dans scripts/, la racine du projet est le dossier parent
+# The script lives in scripts/, the project root is the parent folder
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
@@ -49,37 +49,37 @@ FILES=(
   "$PROJECT_ROOT/README.md"
 )
 
-echo "Domaine cible : $NEW_DOMAIN (remplace '$OLD_DOMAIN')"
+echo "Target domain: $NEW_DOMAIN (replaces '$OLD_DOMAIN')"
 echo
 
 CHANGED=0
 for f in "${FILES[@]}"; do
   if [ ! -f "$f" ]; then
-    echo "Attention : fichier introuvable, ignore : $f" >&2
+    echo "Warning: file not found, skipped: $f" >&2
     continue
   fi
 
   if ! grep -q "$OLD_DOMAIN" "$f"; then
-    echo "  (rien a remplacer dans ${f#$PROJECT_ROOT/})"
+    echo "  (nothing to replace in ${f#$PROJECT_ROOT/})"
     continue
   fi
 
   cp "$f" "${f}.bak"
   sed -i.tmp "s/${OLD_DOMAIN}/${NEW_DOMAIN}/g" "$f"
   rm -f "${f}.tmp"
-  echo "  modifie : ${f#$PROJECT_ROOT/}  (sauvegarde : ${f#$PROJECT_ROOT/}.bak)"
+  echo "  modified: ${f#$PROJECT_ROOT/}  (backup: ${f#$PROJECT_ROOT/}.bak)"
   CHANGED=$((CHANGED + 1))
 done
 
 echo
 if [ "$CHANGED" -eq 0 ]; then
-  echo "Aucun fichier modifie (deja a jour, ou placeholder '$OLD_DOMAIN' absent)."
+  echo "No files modified (already up to date, or placeholder '$OLD_DOMAIN' absent)."
 else
-  echo "$CHANGED fichier(s) mis a jour avec le domaine '$NEW_DOMAIN'."
+  echo "$CHANGED file(s) updated with the domain '$NEW_DOMAIN'."
   echo
-  echo "Prochaine etape : pointe les DNS suivants vers l'IP publique de"
-  echo "master1 (terraform output master1_public_ip) avant de lancer"
-  echo "l'etape cert-manager :"
+  echo "Next step: point the following DNS records to the public IP of"
+  echo "master1 (terraform output master1_public_ip) before running"
+  echo "the cert-manager step:"
   echo "  - argocd.${NEW_DOMAIN}"
   echo "  - monitoring.${NEW_DOMAIN}"
 fi

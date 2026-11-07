@@ -1,17 +1,17 @@
 ---
 # ============================================================
-# Playbook : installer Terraform sur cette machine Ubuntu
-# S'execute sur localhost (la VM elle-meme, pas un noeud distant)
+# Playbook: install Terraform on this Ubuntu machine
+# Runs on localhost (the VM itself, not a remote node)
 # ============================================================
-- name: Installer Terraform (HashiCorp) sur Ubuntu
+- name: Install Terraform (HashiCorp) on Ubuntu
   hosts: localhost
   connection: local
   become: yes
   vars:
-    terraform_version: ""   # laisser vide = derniere version disponible via apt
+    terraform_version: ""   # leave empty = latest version available via apt
 
   tasks:
-    - name: Installer les dependances de base
+    - name: Install base dependencies
       apt:
         name:
           - gnupg
@@ -22,43 +22,43 @@
         state: present
         update_cache: yes
 
-    - name: Creer le repertoire pour les cles GPG (methode moderne, apt-key est deprecie)
+    - name: Create the directory for GPG keys (modern method, apt-key is deprecated)
       file:
         path: /etc/apt/keyrings
         state: directory
         mode: '0755'
 
-    - name: Telecharger et installer la cle GPG officielle HashiCorp
+    - name: Download and install the official HashiCorp GPG key
       shell: |
         curl -fsSL https://apt.releases.hashicorp.com/gpg | gpg --dearmor -o /etc/apt/keyrings/hashicorp.gpg
       args:
         creates: /etc/apt/keyrings/hashicorp.gpg
 
-    - name: "Recuperer le nom de la distribution Ubuntu (ex. jammy, noble)"
+    - name: "Get the Ubuntu distribution codename (e.g. jammy, noble)"
       command: lsb_release -cs
       register: ubuntu_codename
       changed_when: false
 
-    - name: Ajouter le depot officiel HashiCorp
+    - name: Add the official HashiCorp repository
       apt_repository:
         repo: "deb [signed-by=/etc/apt/keyrings/hashicorp.gpg] https://apt.releases.hashicorp.com {{ ubuntu_codename.stdout }} main"
         state: present
         filename: hashicorp
 
-    - name: Mettre a jour le cache apt apres ajout du depot
+    - name: Update the apt cache after adding the repository
       apt:
         update_cache: yes
 
-    - name: Installer Terraform
+    - name: Install Terraform
       apt:
         name: "terraform{{ '=' + terraform_version if terraform_version | length > 0 else '' }}"
         state: present
 
-    - name: Verifier l'installation (afficher la version)
+    - name: Check the installation (display the version)
       command: terraform -version
       register: tf_version
       changed_when: false
 
-    - name: Afficher la version installee
+    - name: Display the installed version
       debug:
         var: tf_version.stdout_lines

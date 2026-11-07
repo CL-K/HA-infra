@@ -2,28 +2,28 @@
 # ============================================================
 # install-cert-manager.yml
 #
-# Installe cert-manager (Helm) et cree deux ClusterIssuer Let's
-# Encrypt (staging + prod) utilisant le challenge HTTP-01 via
-# l'IngressClass "traefik" deja presente dans k3s.
+# Installs cert-manager (Helm) and creates two Let's Encrypt
+# ClusterIssuers (staging + prod) using the HTTP-01 challenge via
+# the "traefik" IngressClass already present in k3s.
 #
-# Pre-requis IMPORTANT :
-#   - Le DNS de argocd.domain.com et monitoring.domain.com doit
-#     DEJA pointer vers l'IP publique de master1 (EIP) avant de
-#     lancer ce playbook : le challenge HTTP-01 est valide par
-#     Let's Encrypt en HTTP (port 80) depuis l'exterieur.
-#   - Le port 80 doit rester ouvert dans le security group
-#     (c'est deja le cas, voir terraform/main.tf).
+# IMPORTANT prerequisites:
+#   - The DNS of argocd.domain.com and monitoring.domain.com must
+#     ALREADY point to the public IP of master1 (EIP) before
+#     running this playbook: the HTTP-01 challenge is validated by
+#     Let's Encrypt over HTTP (port 80) from the outside.
+#   - Port 80 must remain open in the security group
+#     (it already is, see terraform/main.tf).
 #
-# Variable a definir : letsencrypt_email (email de contact Let's
-# Encrypt, utilise pour les alertes d'expiration). A passer via
-# --extra-vars ou a modifier ci-dessous.
+# Variable to set: letsencrypt_email (Let's Encrypt contact
+# email, used for expiration alerts). Pass it via
+# --extra-vars or edit it below.
 #
-# Usage :
+# Usage:
 #   ansible-playbook site.yml --tags cert-manager \
-#     -e letsencrypt_email=TON_VRAI_EMAIL@TON_DOMAINE.com
+#     -e letsencrypt_email=YOUR_REAL_EMAIL@YOUR_DOMAIN.com
 # ============================================================
 
-- name: Installer cert-manager et configurer Let's Encrypt
+- name: Install cert-manager and configure Let's Encrypt
   hosts: "{{ groups['master'][0] }}"
   become: yes
   vars:
@@ -31,41 +31,41 @@
     kubeconfig_path: "/home/ubuntu/.kube/config"
     helm_version: "v3.15.4"
     cert_manager_version: "v1.15.3"
-    # A personnaliser (obligatoire pour Let's Encrypt) :
+    # To customize (mandatory for Let's Encrypt):
     letsencrypt_email: "changeme@domain.com"
 
   tasks:
-    # --- Garde-fou : refuse de continuer avec un email placeholder ou
-    #     un domaine reserve (example.com/org/net), rejete explicitement
-    #     par Let's Encrypt (erreur ACME invalidContact sinon) ---
-    - name: Verifier que letsencrypt_email est une vraie adresse (pas un placeholder)
+    # --- Safeguard: refuses to continue with a placeholder email or
+    #     a reserved domain (example.com/org/net), explicitly rejected
+    #     by Let's Encrypt (ACME invalidContact error otherwise) ---
+    - name: Check that letsencrypt_email is a real address (not a placeholder)
       assert:
         that:
           - letsencrypt_email != "changeme@domain.com"
           - letsencrypt_email is not search("@example\\.(com|org|net)$")
         fail_msg: >-
-          letsencrypt_email="{{ letsencrypt_email }}" est un placeholder
-          ou un domaine reserve (example.com/org/net), rejete par Let's
-          Encrypt (erreur ACME invalidContact). Relance avec une vraie
-          adresse : -e letsencrypt_email=ton.email@tondomaine.com
-        success_msg: "letsencrypt_email semble valide."
+          letsencrypt_email="{{ letsencrypt_email }}" is a placeholder
+          or a reserved domain (example.com/org/net), rejected by Let's
+          Encrypt (ACME invalidContact error). Rerun with a real
+          address: -e letsencrypt_email=your.email@yourdomain.com
+        success_msg: "letsencrypt_email looks valid."
 
-    # --- Installer Helm (idempotent, version pinnee) ---
-    - name: Telecharger script d'installation Helm
+    # --- Install Helm (idempotent, pinned version) ---
+    - name: Download the Helm installation script
       get_url:
         url: "https://raw.githubusercontent.com/helm/helm/{{ helm_version }}/scripts/get-helm-3"
         dest: /tmp/get_helm.sh
         mode: '0755'
 
-    - name: Installer Helm
+    - name: Install Helm
       command: /tmp/get_helm.sh
       args:
         creates: /usr/local/bin/helm
       environment:
         DESIRED_VERSION: "{{ helm_version }}"
 
-    # --- Ajouter repo Jetstack (idempotent) ---
-    - name: Ajouter le repo Helm Jetstack (cert-manager)
+    # --- Add the Jetstack repo (idempotent) ---
+    - name: Add the Jetstack Helm repo (cert-manager)
       command: helm repo add jetstack https://charts.jetstack.io
       register: repo_add
       changed_when: "'has been added' in repo_add.stdout"
@@ -73,14 +73,14 @@
       environment:
         KUBECONFIG: "{{ kubeconfig_path }}"
 
-    - name: Mettre a jour les repos Helm
+    - name: Update the Helm repos
       command: helm repo update
       changed_when: false
       environment:
         KUBECONFIG: "{{ kubeconfig_path }}"
 
-    # --- Installer/mettre a jour cert-manager (avec ses CRDs) ---
-    - name: Deployer/mettre a jour cert-manager via Helm
+    # --- Install/upgrade cert-manager (with its CRDs) ---
+    - name: Deploy/upgrade cert-manager via Helm
       command: >
         helm upgrade --install cert-manager jetstack/cert-manager
         --namespace cert-manager --create-namespace
@@ -89,7 +89,7 @@
       environment:
         KUBECONFIG: "{{ kubeconfig_path }}"
 
-    - name: Attendre que les pods cert-manager soient prets
+    - name: Wait for the cert-manager pods to be ready
       command: kubectl get pods -n cert-manager
       register: cm_pods
       retries: 20
@@ -99,15 +99,15 @@
       environment:
         KUBECONFIG: "{{ kubeconfig_path }}"
 
-    - name: Attendre que le webhook cert-manager soit disponible
+    - name: Wait for the cert-manager webhook to be available
       command: kubectl wait --for=condition=Available --timeout=120s deployment/cert-manager-webhook -n cert-manager
       changed_when: false
       environment:
         KUBECONFIG: "{{ kubeconfig_path }}"
 
-    # --- ClusterIssuer Let's Encrypt STAGING (pour tester sans
-    #     epuiser le rate-limit de prod pendant les premiers essais) ---
-    - name: Deployer le ClusterIssuer letsencrypt-staging
+    # --- Let's Encrypt STAGING ClusterIssuer (to test without
+    #     exhausting the prod rate limit during the first attempts) ---
+    - name: Deploy the letsencrypt-staging ClusterIssuer
       copy:
         dest: /tmp/clusterissuer-staging.yaml
         content: |
@@ -126,14 +126,14 @@
                     ingress:
                       ingressClassName: traefik
 
-    - name: Appliquer le ClusterIssuer letsencrypt-staging
+    - name: Apply the letsencrypt-staging ClusterIssuer
       command: kubectl apply -f /tmp/clusterissuer-staging.yaml
       environment:
         KUBECONFIG: "{{ kubeconfig_path }}"
 
-    # --- ClusterIssuer Let's Encrypt PROD (utilise par les Ingress
-    #     ArgoCD et Grafana via l'annotation cert-manager.io/cluster-issuer) ---
-    - name: Deployer le ClusterIssuer letsencrypt-prod
+    # --- Let's Encrypt PROD ClusterIssuer (used by the ArgoCD and
+    #     Grafana Ingresses via the cert-manager.io/cluster-issuer annotation) ---
+    - name: Deploy the letsencrypt-prod ClusterIssuer
       copy:
         dest: /tmp/clusterissuer-prod.yaml
         content: |
@@ -152,12 +152,12 @@
                     ingress:
                       ingressClassName: traefik
 
-    - name: Appliquer le ClusterIssuer letsencrypt-prod
+    - name: Apply the letsencrypt-prod ClusterIssuer
       command: kubectl apply -f /tmp/clusterissuer-prod.yaml
       environment:
         KUBECONFIG: "{{ kubeconfig_path }}"
 
-    - name: Verifier que les ClusterIssuer sont prets (Ready=True)
+    - name: Check that the ClusterIssuers are ready (Ready=True)
       command: kubectl get clusterissuer -o wide
       register: issuers
       retries: 10
@@ -170,16 +170,16 @@
     - debug:
         msg: "{{ issuers.stdout_lines }}"
 
-    - name: Resume cert-manager
+    - name: cert-manager summary
       debug:
         msg: |
-          cert-manager installe, ClusterIssuer "letsencrypt-staging" et
-          "letsencrypt-prod" prets.
+          cert-manager installed, ClusterIssuers "letsencrypt-staging" and
+          "letsencrypt-prod" ready.
 
-          Les Ingress ArgoCD et Grafana (etapes suivantes) utilisent
-          automatiquement letsencrypt-prod via l'annotation
-          cert-manager.io/cluster-issuer.
+          The ArgoCD and Grafana Ingresses (next steps) automatically
+          use letsencrypt-prod via the
+          cert-manager.io/cluster-issuer annotation.
 
-          Rappel : le DNS de argocd.domain.com et monitoring.domain.com
-          doit deja pointer vers l'IP publique de master1
-          ({{ ansible_host }}) pour que le challenge HTTP-01 reussisse.
+          Reminder: the DNS of argocd.domain.com and monitoring.domain.com
+          must already point to the public IP of master1
+          ({{ ansible_host }}) for the HTTP-01 challenge to succeed.

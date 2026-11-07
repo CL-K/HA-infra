@@ -1,48 +1,48 @@
 ---
 # ============================================================
-# site.yml - Playbook orchestrateur du projet HA-infra
+# site.yml - Orchestrator playbook of the HA-infra project
 #
-# S'execute depuis le dossier ansible/ (ou ansible.cfg pointe
-# vers ./hosts, present dans ce meme dossier).
+# Runs from the ansible/ folder (where ansible.cfg points
+# to ./hosts, located in this same folder).
 #
-# Usage :
+# Usage:
 #   cd ansible
-#   ansible-playbook site.yml                      -> tout deployer
-#   ansible-playbook site.yml --tags k3s            -> uniquement k3s
-#   ansible-playbook site.yml --skip-tags guestbook -> tout sauf la demo
+#   ansible-playbook site.yml                      -> deploy everything
+#   ansible-playbook site.yml --tags k3s            -> k3s only
+#   ansible-playbook site.yml --skip-tags guestbook -> everything except the demo
 #
-# TLS (Let's Encrypt) : l'etape cert-manager necessite un email de
-# contact valide. A fournir via --extra-vars, sinon la valeur par
-# defaut "changeme@domain.com" du playbook est utilisee (a eviter
-# en usage reel) :
-#   ansible-playbook site.yml -e letsencrypt_email=TON_VRAI_EMAIL@TON_DOMAINE.com
+# TLS (Let's Encrypt): the cert-manager step requires a valid
+# contact email. Provide it via --extra-vars, otherwise the playbook's
+# default value "changeme@domain.com" is used (to avoid
+# in real use):
+#   ansible-playbook site.yml -e letsencrypt_email=YOUR_REAL_EMAIL@YOUR_DOMAIN.com
 #
-# Prerequis : terraform apply deja fait (voir scripts/update-ip.sh),
-# hosts deja mis a jour (voir scripts/update-hosts.sh),
-# terraform/keys/ma-cle-ssh en 600.
+# Prerequisites: terraform apply already done (see scripts/update-ip.sh),
+# hosts already updated (see scripts/update-hosts.sh),
+# terraform/keys/my-ssh-key set to 600.
 #
-# NB : install-terraform.yml n'est PAS inclus ici car il s'execute
-# sur localhost, en amont, pour outiller la machine de controle
-# (voir README.md). Il se lance separement si besoin :
+# NB: install-terraform.yml is NOT included here because it runs
+# on localhost, upstream, to equip the control machine
+# (see README.md). It is run separately if needed:
 #   ansible-playbook playbooks/install-terraform.yml
 # ============================================================
 
-- name: "Etape 1 - Cluster K3s HA (3 masters + 3 workers)"
+- name: "Step 1 - HA K3s cluster (3 masters + 3 workers)"
   import_playbook: playbooks/install-k3s.yml
   tags: k3s
 
-- name: "Etape 2 - cert-manager + Let's Encrypt (TLS)"
+- name: "Step 2 - cert-manager + Let's Encrypt (TLS)"
   import_playbook: playbooks/install-cert-manager.yml
   tags: cert-manager
 
-- name: "Etape 3 - ArgoCD (GitOps)"
+- name: "Step 3 - ArgoCD (GitOps)"
   import_playbook: playbooks/install-argocd.yml
   tags: argocd
 
-- name: "Etape 4 - Monitoring (Prometheus + Grafana)"
+- name: "Step 4 - Monitoring (Prometheus + Grafana)"
   import_playbook: playbooks/install-monitoring.yml
   tags: monitoring
 
-- name: "Etape 5 - Application de demo (guestbook via ArgoCD)"
+- name: "Step 5 - Demo application (guestbook via ArgoCD)"
   import_playbook: playbooks/guestbook.yml
   tags: guestbook

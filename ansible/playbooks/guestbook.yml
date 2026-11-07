@@ -1,5 +1,5 @@
 ---
-- name: Tester ArgoCD avec le namespace demo et l'application guestbook
+- name: Test ArgoCD with the demo namespace and the guestbook application
   hosts: "{{ groups['master'][0] }}"
   become: yes
   vars:
@@ -7,14 +7,14 @@
     argocd_hostname: "argocd.domain.com"
 
   tasks:
-    # --- Creer le namespace demo ---
-    - name: Creer le namespace demo
+    # --- Create the demo namespace ---
+    - name: Create the demo namespace
       shell: kubectl create namespace demo --dry-run=client -o yaml | kubectl apply -f -
       environment:
         KUBECONFIG: "{{ kubeconfig_path }}"
 
-    # --- Creer l'application ArgoCD guestbook ---
-    - name: Creer l'application ArgoCD guestbook
+    # --- Create the ArgoCD guestbook application ---
+    - name: Create the ArgoCD guestbook application
       shell: |
         cat <<EOF | kubectl apply -n argocd -f -
         apiVersion: argoproj.io/v1alpha1
@@ -39,9 +39,9 @@
       environment:
         KUBECONFIG: "{{ kubeconfig_path }}"
 
-    # --- Attendre la vraie synchronisation (syncPolicy.automated s'en
-    # charge automatiquement, pas besoin de forcer quoi que ce soit) ---
-    - name: Attendre que l'application guestbook soit Synced et Healthy
+    # --- Wait for the real synchronization (syncPolicy.automated takes
+    # care of it automatically, no need to force anything) ---
+    - name: Wait for the guestbook application to be Synced and Healthy
       command: >
         kubectl -n argocd get application guestbook
         -o jsonpath='{.status.sync.status}/{.status.health.status}'
@@ -53,8 +53,8 @@
       environment:
         KUBECONFIG: "{{ kubeconfig_path }}"
 
-    # --- Verification finale des pods deployes dans demo ---
-    - name: Verifier les pods du namespace demo
+    # --- Final check of the pods deployed in demo ---
+    - name: Check the pods in the demo namespace
       command: kubectl get pods -n demo
       register: demo_pods
       changed_when: false
@@ -64,18 +64,18 @@
     - debug:
         msg: "{{ demo_pods.stdout }}"
 
-    # --- Resume final ---
-    - name: Afficher les informations de test
+    # --- Final summary ---
+    - name: Display the test information
       debug:
         msg: |
-          Namespace demo cree
-          Application ArgoCD "guestbook" enregistree et synchronisee ({{ app_status.stdout }})
-          Source : depot officiel https://github.com/argoproj/argocd-example-apps (path: guestbook)
+          Namespace demo created
+          ArgoCD application "guestbook" registered and synchronized ({{ app_status.stdout }})
+          Source: official repository https://github.com/argoproj/argocd-example-apps (path: guestbook)
 
-          Tu peux voir l'application dans l'interface ArgoCD :
-          - URL : https://{{ argocd_hostname }}/
-          - Utilisateur : admin
-          - Mot de passe :
+          You can see the application in the ArgoCD interface:
+          - URL: https://{{ argocd_hostname }}/
+          - User: admin
+          - Password:
             kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d && echo
 
-          L'application "guestbook" est deployee automatiquement dans le namespace demo.
+          The "guestbook" application is deployed automatically in the demo namespace.

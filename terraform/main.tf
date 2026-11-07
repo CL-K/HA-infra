@@ -1,11 +1,11 @@
 # ============================================================
-# Versions Terraform / providers
+# Terraform / provider versions
 # ============================================================
-# Le fichier .terraform.lock.hcl (versionne dans git) fige la version
-# EXACTE du provider ; la contrainte ci-dessous n'est qu'un garde-fou.
-# 'domain = "vpc"' sur aws_eip exige un provider AWS >= 5.0.
-# Pour monter volontairement de version : terraform init -upgrade,
-# puis committer le nouveau .terraform.lock.hcl.
+# The .terraform.lock.hcl file (versioned in git) pins the EXACT
+# provider version; the constraint below is only a safeguard.
+# 'domain = "vpc"' on aws_eip requires an AWS provider >= 5.0.
+# To deliberately upgrade: terraform init -upgrade,
+# then commit the new .terraform.lock.hcl.
 terraform {
   required_version = ">= 1.5, < 2.0"
 
@@ -27,79 +27,79 @@ variable "region" {
 }
 
 variable "allowed_ssh_cidr" {
-  description = "CIDR autorise pour SSH ET pour l'API K3s (port 6443) - remplace par ton IP : 'x.x.x.x/32'"
+  description = "CIDR allowed for SSH AND for the K3s API (port 6443) - replace with your IP: 'x.x.x.x/32'"
   type        = string
   default     = "0.0.0.0/0"
 }
 
 variable "instance_type" {
-  description = "Type d'instance (masters et workers)"
+  description = "Instance type (masters and workers)"
   type        = string
   default     = "m5.large"
 }
 
 variable "ami_id" {
-  description = "AMI Ubuntu 22.04 LTS (us-east-1) - a verifier/mettre a jour si l'AMI est retiree (fin de support standard Ubuntu 22.04 : 2027)"
+  description = "Ubuntu 22.04 LTS AMI (us-east-1) - check/update if the AMI is retired (end of standard support for Ubuntu 22.04: 2027)"
   type        = string
   default     = "ami-08c40ec9ead489470"
 }
 
 variable "master_count" {
-  description = "Nombre de noeuds master (doit rester impair pour le quorum etcd)"
+  description = "Number of master nodes (must stay odd for the etcd quorum)"
   type        = number
   default     = 3
 }
 
 variable "worker_count" {
-  description = "Nombre de noeuds worker"
+  description = "Number of worker nodes"
   type        = number
   default     = 3
 }
 
 variable "az_count" {
-  description = "Nombre de zones de disponibilite (AZ) sur lesquelles repartir masters et workers (round-robin). Avec la valeur par defaut (3) et master_count/worker_count=3, chaque noeud d'un role est dans une AZ distincte : la perte d'une AZ laisse 2 masters (quorum etcd toujours majoritaire) et 2 workers actifs."
+  description = "Number of availability zones (AZs) across which to spread masters and workers (round-robin). With the default value (3) and master_count/worker_count=3, each node of a given role is in a distinct AZ: losing one AZ leaves 2 masters (etcd quorum still a majority) and 2 active workers."
   type        = number
   default     = 3
 }
 
 variable "volume_size_master" {
-  description = "Taille du disque root en GB pour les masters (etcd est sensible aux I/O)"
+  description = "Root disk size in GB for the masters (etcd is sensitive to I/O)"
   type        = number
   default     = 50
 }
 
 variable "volume_size_worker" {
-  description = "Taille du disque root en GB pour les workers"
+  description = "Root disk size in GB for the workers"
   type        = number
   default     = 50
 }
 
 variable "key_name" {
-  description = "Nom de la cle SSH"
+  description = "SSH key name"
   type        = string
-  default     = "ma-cle-ssh"
+  default     = "my-ssh-key"
 }
 
 variable "project_name" {
-  description = "Nom du projet (utilise pour les tags)"
+  description = "Project name (used for tags)"
   type        = string
   default     = "k3s-cluster"
 }
 
 variable "vpc_cidr" {
-  description = "CIDR du VPC"
+  description = "VPC CIDR"
   type        = string
   default     = "192.168.0.0/16"
 }
 
 variable "subnet_cidr" {
-  description = "CIDR de base pour les subnets publics (masters). Decoupe automatiquement en un /26 par AZ (jusqu'a 4 AZ) via cidrsubnet() - doit rester coherent avec ansible/hosts (voir commentaires du fichier)."
+  description = "Base CIDR for the public subnets (masters). Automatically split into one /26 per AZ (up to 4 AZs) via cidrsubnet() - must stay consistent with ansible/hosts (see the file's comments)."
   type        = string
   default     = "192.168.2.0/24"
 }
 
 variable "private_subnet_cidr" {
-  description = "CIDR de base pour les subnets prives (workers). Decoupe automatiquement en un /26 par AZ (jusqu'a 4 AZ) via cidrsubnet() - doit rester coherent avec ansible/hosts (voir commentaires du fichier)."
+  description = "Base CIDR for the private subnets (workers). Automatically split into one /26 per AZ (up to 4 AZs) via cidrsubnet() - must stay consistent with ansible/hosts (see the file's comments)."
   type        = string
   default     = "192.168.3.0/24"
 }
@@ -112,15 +112,15 @@ provider "aws" {
 }
 
 # ============================================================
-# Data source : AZ disponibles dans la region
+# Data source: AZs available in the region
 # ============================================================
 data "aws_availability_zones" "available" {
   state = "available"
 }
 
 locals {
-  # Les az_count premieres AZ disponibles dans la region, utilisees
-  # en round-robin pour repartir masters et workers.
+  # The first az_count AZs available in the region, used
+  # round-robin to spread masters and workers.
   azs = slice(
     data.aws_availability_zones.available.names,
     0,
@@ -130,20 +130,20 @@ locals {
 }
 
 # ============================================================
-# Reseau (MULTI-AZ)
+# Network (MULTI-AZ)
 # ============================================================
-# HA reelle : un subnet public + un subnet prive par AZ utilisee
-# (local.azs). Masters et workers sont repartis en round-robin sur
-# ces AZ (voir aws_instance.master/worker plus bas). La perte d'une
-# AZ AWS n'affecte donc plus qu'une fraction du cluster, au lieu de
-# le mettre integralement hors service.
+# Real HA: one public subnet + one private subnet per AZ used
+# (local.azs). Masters and workers are spread round-robin across
+# these AZs (see aws_instance.master/worker below). Losing an AWS
+# AZ therefore only affects a fraction of the cluster, instead of
+# taking it entirely out of service.
 #
-# - Subnets PUBLICS (masters) : IGW direct + EIP par master.
-# - Subnets PRIVES (workers)  : pas d'IP publique, sortie Internet
-#   via un NAT Gateway DEDIE PAR AZ (necessaire pour apt et curl
-#   get.k3s.io lances par le playbook Ansible site.yml sur les
-#   workers) - evite qu'un NAT Gateway unique devienne lui-meme un
-#   point de defaillance partage entre AZ.
+# - PUBLIC subnets (masters): direct IGW + one EIP per master.
+# - PRIVATE subnets (workers): no public IP, Internet egress
+#   through a NAT Gateway DEDICATED PER AZ (needed for apt and curl
+#   get.k3s.io run by the Ansible site.yml playbook on the
+#   workers) - prevents a single NAT Gateway from itself becoming a
+#   point of failure shared across AZs.
 resource "aws_vpc" "main" {
   cidr_block           = var.vpc_cidr
   enable_dns_support   = true
@@ -192,8 +192,8 @@ resource "aws_internet_gateway" "main" {
   }
 }
 
-# Une seule table de routage publique (route IGW identique pour
-# toutes les AZ) partagee par tous les subnets publics.
+# A single public route table (identical IGW route for all
+# AZs) shared by all public subnets.
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.main.id
 
@@ -214,9 +214,9 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.public.id
 }
 
-# --- NAT Gateway dedie par AZ : chaque subnet prive sort par SON
-#     propre NAT Gateway (dans le subnet public de la meme AZ), pas
-#     de dependance croisee entre AZ pour la sortie Internet ---
+# --- Dedicated NAT Gateway per AZ: each private subnet egresses through ITS
+#     own NAT Gateway (in the public subnet of the same AZ), no
+#     cross-AZ dependency for Internet egress ---
 resource "aws_eip" "nat" {
   count  = local.az_n
   domain = "vpc"
@@ -230,7 +230,7 @@ resource "aws_eip" "nat" {
 resource "aws_nat_gateway" "main" {
   count         = local.az_n
   allocation_id = aws_eip.nat[count.index].id
-  subnet_id     = aws_subnet.public[count.index].id # NAT GW de l'AZ N vit dans le subnet public de l'AZ N
+  subnet_id     = aws_subnet.public[count.index].id # NAT GW of AZ N lives in the public subnet of AZ N
 
   tags = {
     Name    = "${var.project_name}-nat-${count.index + 1}"
@@ -240,8 +240,8 @@ resource "aws_nat_gateway" "main" {
   depends_on = [aws_internet_gateway.main]
 }
 
-# Une table de routage privee PAR AZ, chacune pointant vers le NAT
-# Gateway de sa propre AZ.
+# One private route table PER AZ, each pointing to the NAT
+# Gateway of its own AZ.
 resource "aws_route_table" "private" {
   count  = local.az_n
   vpc_id = aws_vpc.main.id
@@ -268,7 +268,7 @@ resource "aws_route_table_association" "private" {
 # ============================================================
 resource "aws_security_group" "k3s" {
   name        = "${var.project_name}-sg"
-  description = "Regles pour cluster K3s HA multi-AZ (SSH, HTTP, HTTPS, API server, etcd, kubelet, VXLAN)"
+  description = "Rules for the multi-AZ HA K3s cluster (SSH, HTTP, HTTPS, API server, etcd, kubelet, VXLAN)"
   vpc_id      = aws_vpc.main.id
 
   ingress {
@@ -295,26 +295,26 @@ resource "aws_security_group" "k3s" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # K3s API server (kube-apiserver) - acces externe pour kubectl,
-  # restreint au meme CIDR que SSH (allowed_ssh_cidr) : evite d'exposer
-  # l'API Kubernetes a tout Internet. Le script scripts/update-ip.sh
-  # positionne automatiquement ce CIDR sur l'IP publique de la machine
-  # de controle a chaque run.
+  # K3s API server (kube-apiserver) - external access for kubectl,
+  # restricted to the same CIDR as SSH (allowed_ssh_cidr): avoids exposing
+  # the Kubernetes API to the whole Internet. The scripts/update-ip.sh script
+  # automatically sets this CIDR to the public IP of the control
+  # machine on every run.
   ingress {
-    description = "K3s API server (restreint a allowed_ssh_cidr)"
+    description = "K3s API server (restricted to allowed_ssh_cidr)"
     from_port   = 6443
     to_port     = 6443
     protocol    = "tcp"
     cidr_blocks = [var.allowed_ssh_cidr]
   }
 
-  # Trafic interne complet entre les noeuds du cluster (etcd, kubelet,
-  # flannel VXLAN, etc.). "self = true" couvre le trafic entre toutes
-  # les instances attachees a ce SG, y compris entre AZ differentes
-  # (le VPC route nativement entre ses propres subnets, quelle que
-  # soit leur AZ).
+  # Full internal traffic between the cluster nodes (etcd, kubelet,
+  # flannel VXLAN, etc.). "self = true" covers traffic between all
+  # instances attached to this SG, including across different AZs
+  # (the VPC natively routes between its own subnets, whatever
+  # their AZ).
   ingress {
-    description = "Trafic interne cluster (etcd, kubelet, flannel, etc.)"
+    description = "Internal cluster traffic (etcd, kubelet, flannel, etc.)"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -336,7 +336,7 @@ resource "aws_security_group" "k3s" {
 }
 
 # ============================================================
-# Cle SSH
+# SSH key
 # ============================================================
 resource "aws_key_pair" "main" {
   key_name   = var.key_name
@@ -348,13 +348,13 @@ resource "aws_key_pair" "main" {
 }
 
 # ============================================================
-# Instances EC2 - Masters (control plane + etcd, subnets publics)
+# EC2 instances - Masters (control plane + etcd, public subnets)
 #
-# Repartition round-robin sur local.azs : master[i] va dans le
-# subnet public d'index (i % az_n), a l'AZ correspondante. L'IP
-# privee est calculee automatiquement (cidrhost) a l'interieur du
-# subnet cible, hote 10 + N-ieme passage sur la meme AZ (pour
-# rester compatible avec master_count > az_count sans collision).
+# Round-robin distribution over local.azs: master[i] goes into the
+# public subnet of index (i % az_n), in the corresponding AZ. The
+# private IP is computed automatically (cidrhost) inside the
+# target subnet, host 10 + N-th pass over the same AZ (to
+# stay compatible with master_count > az_count without collisions).
 # ============================================================
 resource "aws_instance" "master" {
   count                  = var.master_count
@@ -365,9 +365,9 @@ resource "aws_instance" "master" {
   vpc_security_group_ids = [aws_security_group.k3s.id]
   key_name               = aws_key_pair.main.key_name
 
-  # Pas de user_data : l'installation de k3s est entierement geree
-  # par le playbook Ansible site.yml (ansible-playbook site.yml).
-  # L'AMI Ubuntu standard embarque deja python3, requis par Ansible.
+  # No user_data: the k3s installation is entirely handled
+  # by the Ansible site.yml playbook (ansible-playbook site.yml).
+  # The standard Ubuntu AMI already ships python3, required by Ansible.
 
   root_block_device {
     volume_size           = var.volume_size_master
@@ -385,8 +385,8 @@ resource "aws_instance" "master" {
 }
 
 # ============================================================
-# Instances EC2 - Workers (subnets prives, une par AZ, pas d'EIP)
-# Meme logique de repartition round-robin que les masters.
+# EC2 instances - Workers (private subnets, one per AZ, no EIP)
+# Same round-robin distribution logic as the masters.
 # ============================================================
 resource "aws_instance" "worker" {
   count                   = var.worker_count
@@ -397,8 +397,8 @@ resource "aws_instance" "worker" {
   vpc_security_group_ids  = [aws_security_group.k3s.id]
   key_name                = aws_key_pair.main.key_name
 
-  # Pas de user_data : le join k3s agent est entierement gere par
-  # le playbook Ansible site.yml.
+  # No user_data: the k3s agent join is entirely handled by
+  # the Ansible site.yml playbook.
 
   root_block_device {
     volume_size           = var.volume_size_worker
@@ -414,15 +414,15 @@ resource "aws_instance" "worker" {
     AZ      = local.azs[count.index % local.az_n]
   }
 
-  # Les workers demarrent apres les masters (le cluster doit exister
-  # et master1 doit etre up pour servir de bastion SSH) et apres que
-  # tous les NAT Gateway soient prets (sortie Internet necessaire).
+  # Workers start after the masters (the cluster must exist
+  # and master1 must be up to serve as SSH bastion) and after
+  # all NAT Gateways are ready (Internet egress required).
   depends_on = [aws_instance.master, aws_nat_gateway.main]
 }
 
 # ============================================================
-# Elastic IP - uniquement sur les masters (acces API + SSH admin)
-# Les workers restent en IP privee (subnets prives, pas d'EIP)
+# Elastic IP - only on the masters (API access + admin SSH)
+# Workers stay on private IPs (private subnets, no EIP)
 # ============================================================
 resource "aws_eip" "master" {
   count    = var.master_count
@@ -439,7 +439,7 @@ resource "aws_eip" "master" {
 # Outputs
 # ============================================================
 output "masters" {
-  description = "IP publiques, privees et AZ des masters"
+  description = "Public IPs, private IPs and AZs of the masters"
   value = {
     for idx, inst in aws_instance.master :
     "master-${idx + 1}" => {
@@ -451,7 +451,7 @@ output "masters" {
 }
 
 output "workers" {
-  description = "IP privees et AZ des workers (pas d'IP publique, subnets prives)"
+  description = "Private IPs and AZs of the workers (no public IP, private subnets)"
   value = {
     for idx, inst in aws_instance.worker :
     "worker-${idx + 1}" => {
@@ -462,11 +462,11 @@ output "workers" {
 }
 
 output "availability_zones" {
-  description = "AZ utilisees par le cluster (round-robin masters/workers)"
+  description = "AZs used by the cluster (round-robin masters/workers)"
   value       = local.azs
 }
 
 output "master1_public_ip" {
-  description = "IP publique de master1 - a reporter dans hosts.ini a la place de <MASTER1_PUBLIC_IP>"
+  description = "Public IP of master1 - to put in the hosts inventory in place of <MASTER1_PUBLIC_IP>"
   value       = aws_eip.master[0].public_ip
 }

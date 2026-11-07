@@ -2,23 +2,23 @@
 # ============================================================
 # vault.yml.example
 #
-# Template pour les secrets du groupe [master], charge
-# automatiquement par Ansible (group_vars/master/) sur tous les
-# plays cibles sur le groupe master (donc aussi sur
-# groups['master'][0], utilise par install-monitoring.yml).
+# Template for the secrets of the [master] group, loaded
+# automatically by Ansible (group_vars/master/) on all
+# plays targeting the master group (therefore also on
+# groups['master'][0], used by install-monitoring.yml).
 #
-# Usage :
-#   1. Copier ce fichier :
+# Usage:
+#   1. Copy this file:
 #        cp ansible/group_vars/master/vault.yml.example \
 #           ansible/group_vars/master/vault.yml
-#   2. Remplacer la valeur ci-dessous par un vrai mot de passe.
-#   3. Chiffrer le fichier :
+#   2. Replace the value below with a real password.
+#   3. Encrypt the file:
 #        ansible-vault encrypt ansible/group_vars/master/vault.yml
-#   4. Lancer les playbooks avec --ask-vault-pass, ou
-#      --vault-password-file=<chemin_vers_fichier_mdp> (fichier a
-#      NE JAMAIS committer, deja couvert par .gitignore).
+#   4. Run the playbooks with --ask-vault-pass, or
+#      --vault-password-file=<path_to_password_file> (file to
+#      NEVER commit, already covered by .gitignore).
 #
-# vault.yml (une fois cree, chiffre ou non) est ignore par Git -
-# seul ce .example, sans secret reel, est versionne.
+# vault.yml (once created, encrypted or not) is ignored by Git -
+# only this .example, with no real secret, is versioned.
 # ============================================================
-grafana_admin_password: "CHANGE_MOI_avant_ansible-vault_encrypt"
+grafana_admin_password: "CHANGE_ME_before_ansible-vault_encrypt"

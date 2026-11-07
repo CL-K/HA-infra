@@ -1,32 +1,32 @@
 ---
 # ============================================================
-# Playbook K3s HA - 3 masters (etcd embarque) + 3 workers, repartis
-# sur 3 AZ (voir terraform/main.tf, var az_count). IPs privees
-# fixes definies dans ansible/hosts (192.168.2.10/74/138 pour les
-# masters, 192.168.3.10/74/138 pour les workers - une IP par AZ,
-# voir les commentaires du fichier hosts pour le detail du calcul).
-# Masters avec EIP (acces public), workers en IP privee uniquement
-# (SSH via ProxyJump defini dans hosts, fonctionne quelle que soit
-# l'AZ du worker cible grace au routage natif entre subnets d'un
-# meme VPC).
+# HA K3s playbook - 3 masters (embedded etcd) + 3 workers, spread
+# over 3 AZs (see terraform/main.tf, var az_count). Fixed private
+# IPs defined in ansible/hosts (192.168.2.10/74/138 for the
+# masters, 192.168.3.10/74/138 for the workers - one IP per AZ,
+# see the comments in the hosts file for the calculation details).
+# Masters with EIP (public access), workers on private IP only
+# (SSH via ProxyJump defined in hosts, works whatever the
+# AZ of the target worker thanks to native routing between subnets of the
+# same VPC).
 #
-# Regle : le trafic INTERNE du cluster (join etcd, K3S_URL) utilise
-# systematiquement les IP PRIVEES (node_private_ip), jamais les IP
-# publiques des masters.
+# Rule: INTERNAL cluster traffic (etcd join, K3S_URL) always
+# uses the PRIVATE IPs (node_private_ip), never the public IPs
+# of the masters.
 #
-# CORRECTIONS apportees :
-#   - Play 2 : serial: 1 pour joindre les masters etcd un par un
-#     (evite les race conditions sur le quorum etcd)
-#   - Play 2/3 : wait_for sur le port 6443 / 10250 au lieu de
-#     s'appuyer sur le statut immediat du module systemd
-#   - Play 2 : verification kubectl get nodes (Ready) apres chaque
-#     jointure de master, avant de passer au suivant
+# FIXES applied:
+#   - Play 2: serial: 1 to join the etcd masters one by one
+#     (avoids race conditions on the etcd quorum)
+#   - Play 2/3: wait_for on port 6443 / 10250 instead of
+#     relying on the immediate status of the systemd module
+#   - Play 2: kubectl get nodes (Ready) check after each
+#     master join, before moving on to the next one
 # ============================================================
 
 # ------------------------------------------------------------
-# Play 1 : Premier master - initialise le cluster (cluster-init)
+# Play 1: First master - initializes the cluster (cluster-init)
 # ------------------------------------------------------------
-- name: Installer le premier master K3s (cluster-init)
+- name: Install the first K3s master (cluster-init)
   hosts: "{{ groups['master'][0] }}"
   become: yes
   vars:
@@ -35,7 +35,7 @@
     kube_group: "kube"
 
   tasks:
-    - name: Installer dependances
+    - name: Install dependencies
       apt:
         name:
           - curl
@@ -43,18 +43,18 @@
         state: present
         update_cache: yes
 
-    - name: Creer groupe kube si absent
+    - name: Create the kube group if absent
       group:
         name: "{{ kube_group }}"
         state: present
 
-    - name: Ajouter utilisateur {{ kube_user }} au groupe kube
+    - name: Add user {{ kube_user }} to the kube group
       user:
         name: "{{ kube_user }}"
         groups: "{{ kube_group }}"
         append: yes
 
-    - name: Installer k3s (premier master, cluster-init)
+    - name: Install k3s (first master, cluster-init)
       shell: |
         curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION={{ k3s_version }} \
         sh -s - server --cluster-init \
@@ -66,30 +66,30 @@
         creates: /etc/rancher/k3s/k3s.yaml
       no_log: true
 
-    - name: Attendre que k3s soit pret (fichier node-token genere)
+    - name: Wait for k3s to be ready (node-token file generated)
       wait_for:
         path: /var/lib/rancher/k3s/server/node-token
         timeout: 90
 
-    - name: Attendre que le port API 6443 soit disponible
+    - name: Wait for the API port 6443 to be available
       wait_for:
         port: 6443
         host: "{{ node_private_ip }}"
         timeout: 120
 
-    - name: Recuperer le token k3s
+    - name: Retrieve the k3s token
       command: cat /var/lib/rancher/k3s/server/node-token
       register: k3s_token
       changed_when: false
       no_log: true
 
-    - name: Exposer le token et l'URL de jonction pour les plays suivantes
+    - name: Expose the token and the join URL for the following plays
       set_fact:
         k3s_join_token: "{{ k3s_token.stdout }}"
         k3s_join_url: "https://{{ node_private_ip }}:6443"
       no_log: true
 
-    - name: Creer le repertoire .kube pour {{ kube_user }}
+    - name: Create the .kube directory for {{ kube_user }}
       file:
         path: /home/{{ kube_user }}/.kube
         state: directory
@@ -97,7 +97,7 @@
         group: "{{ kube_user }}"
         mode: '0755'
 
-    - name: Copier la configuration k3s pour {{ kube_user }}
+    - name: Copy the k3s configuration for {{ kube_user }}
       copy:
         src: /etc/rancher/k3s/k3s.yaml
         dest: /home/{{ kube_user }}/.kube/config
@@ -106,17 +106,17 @@
         group: "{{ kube_user }}"
         mode: '0640'
 
-    # --- IMPORTANT : /home/{{ kube_user }}/.kube/config GARDE
-    #     127.0.0.1 comme adresse de serveur. Ce fichier est utilise
-    #     par TOUS les kubectl/helm executes DEPUIS master1 dans les
-    #     playbooks suivants (cert-manager, argocd, monitoring...).
-    #     Le remplacer par l'IP publique casserait ces appels : AWS
-    #     ne supporte pas le hairpin NAT (une instance ne peut pas se
-    #     joindre elle-meme via sa propre IP publique/EIP - le
-    #     paquet part par l'IGW mais ne peut pas revenir). D'ou un
-    #     kubeconfig SEPARE, uniquement pour un usage EXTERNE (depuis
-    #     ta machine, qui n'a pas ce probleme de hairpin).
-    - name: Creer un kubeconfig EXTERNE (IP publique) pour acces depuis ta machine
+    # --- IMPORTANT: /home/{{ kube_user }}/.kube/config KEEPS
+    #     127.0.0.1 as the server address. This file is used
+    #     by ALL kubectl/helm commands run FROM master1 in the
+    #     following playbooks (cert-manager, argocd, monitoring...).
+    #     Replacing it with the public IP would break those calls: AWS
+    #     does not support hairpin NAT (an instance cannot reach
+    #     itself through its own public IP/EIP - the
+    #     packet leaves via the IGW but cannot come back). Hence a
+    #     SEPARATE kubeconfig, only for EXTERNAL use (from
+    #     your machine, which does not have this hairpin problem).
+    - name: Create an EXTERNAL kubeconfig (public IP) for access from your machine
       copy:
         src: /home/{{ kube_user }}/.kube/config
         dest: /home/{{ kube_user }}/.kube/config-external
@@ -125,19 +125,19 @@
         group: "{{ kube_user }}"
         mode: '0640'
 
-    - name: Remplacer l'adresse localhost par l'IP publique (kubeconfig externe uniquement)
+    - name: Replace the localhost address with the public IP (external kubeconfig only)
       replace:
         path: /home/{{ kube_user }}/.kube/config-external
         regexp: '127\.0\.0\.1'
         replace: '{{ ansible_host }}'
 
-    - name: Ajouter KUBECONFIG (interne, 127.0.0.1) dans le .bashrc de {{ kube_user }}
+    - name: Add KUBECONFIG (internal, 127.0.0.1) to the .bashrc of {{ kube_user }}
       lineinfile:
         path: "/home/{{ kube_user }}/.bashrc"
         line: 'export KUBECONFIG=/home/{{ kube_user }}/.kube/config'
         state: present
 
-    - name: Verifier que le cluster est pret
+    - name: Check that the cluster is ready
       command: kubectl get nodes
       register: result
       retries: 10
@@ -147,31 +147,31 @@
       environment:
         KUBECONFIG: /home/{{ kube_user }}/.kube/config
 
-    - name: Afficher comment recuperer le kubeconfig externe
+    - name: Display how to retrieve the external kubeconfig
       debug:
         msg: |
-          Cluster K3s pret. Pour piloter le cluster DEPUIS TA MACHINE
-          (et non depuis master1), recupere le kubeconfig externe :
+          K3s cluster ready. To control the cluster FROM YOUR MACHINE
+          (and not from master1), retrieve the external kubeconfig:
 
-            scp -i terraform/keys/ma-cle-ssh \
+            scp -i terraform/keys/my-ssh-key \
               ubuntu@{{ ansible_host }}:/home/{{ kube_user }}/.kube/config-external \
               ./kubeconfig-{{ inventory_hostname }}
 
-          Puis : export KUBECONFIG=./kubeconfig-{{ inventory_hostname }}
+          Then: export KUBECONFIG=./kubeconfig-{{ inventory_hostname }}
                  kubectl get nodes
 
-          (Le fichier /home/{{ kube_user }}/.kube/config sur master1,
-          lui, garde 127.0.0.1 : c'est celui utilise par les playbooks
-          suivants qui executent kubectl/helm depuis master1 lui-meme -
-          AWS ne permet pas a une instance de se joindre via sa propre
-          IP publique.)
+          (The file /home/{{ kube_user }}/.kube/config on master1,
+          on the other hand, keeps 127.0.0.1: it is the one used by the
+          following playbooks which run kubectl/helm from master1 itself -
+          AWS does not allow an instance to reach itself through its own
+          public IP.)
 
 # ------------------------------------------------------------
-# Play 2 : Masters additionnels - rejoignent le cluster existant
-# serial: 1 => un master a la fois pour ne pas fragiliser le
-# quorum etcd pendant les jointures concurrentes.
+# Play 2: Additional masters - join the existing cluster
+# serial: 1 => one master at a time so as not to weaken the
+# etcd quorum during concurrent joins.
 # ------------------------------------------------------------
-- name: Installer les masters additionnels (join HA)
+- name: Install the additional masters (HA join)
   hosts: "master:!{{ groups['master'][0] }}"
   become: yes
   serial: 1
@@ -182,7 +182,7 @@
     first_master: "{{ groups['master'][0] }}"
 
   tasks:
-    - name: Installer dependances
+    - name: Install dependencies
       apt:
         name:
           - curl
@@ -190,12 +190,12 @@
         state: present
         update_cache: yes
 
-    - name: Creer groupe kube si absent
+    - name: Create the kube group if absent
       group:
         name: "{{ kube_group }}"
         state: present
 
-    - name: Installer k3s (master additionnel, rejoint le cluster via IP privee)
+    - name: Install k3s (additional master, joins the cluster via private IP)
       shell: |
         curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION={{ k3s_version }} \
         sh -s - server \
@@ -209,18 +209,18 @@
         creates: /etc/rancher/k3s/k3s.yaml
       no_log: true
 
-    - name: Verifier que le service k3s est demarre
+    - name: Check that the k3s service is started
       systemd:
         name: k3s
         state: started
 
-    - name: Attendre que le port API 6443 local soit disponible
+    - name: Wait for the local API port 6443 to be available
       wait_for:
         port: 6443
         host: "{{ node_private_ip }}"
         timeout: 180
 
-    - name: Attendre que ce master rejoigne etcd et apparaisse Ready
+    - name: Wait for this master to join etcd and appear Ready
       command: kubectl get node {{ inventory_hostname }} --no-headers
       register: node_status
       retries: 15
@@ -232,10 +232,10 @@
       delegate_to: "{{ first_master }}"
 
 # ------------------------------------------------------------
-# Play 3 : Workers - rejoignent le cluster en tant qu'agents
-# (SSH via ProxyJump defini dans inventory.ini, cible master1)
+# Play 3: Workers - join the cluster as agents
+# (SSH via ProxyJump defined in the hosts inventory, targeting master1)
 # ------------------------------------------------------------
-- name: Installer les workers K3s (agents)
+- name: Install the K3s workers (agents)
   hosts: worker
   become: yes
   vars:
@@ -243,7 +243,7 @@
     first_master: "{{ groups['master'][0] }}"
 
   tasks:
-    - name: Installer dependances
+    - name: Install dependencies
       apt:
         name:
           - curl
@@ -251,7 +251,7 @@
         state: present
         update_cache: yes
 
-    - name: Installer k3s agent (worker, rejoint via IP privee)
+    - name: Install k3s agent (worker, joins via private IP)
       shell: |
         curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION={{ k3s_version }} \
         K3S_URL={{ hostvars[first_master].k3s_join_url }} \
@@ -263,28 +263,28 @@
         creates: /etc/systemd/system/k3s-agent.service
       no_log: true
 
-    - name: Verifier que le service k3s-agent est demarre
+    - name: Check that the k3s-agent service is started
       systemd:
         name: k3s-agent
         state: started
 
-    - name: Attendre que le kubelet du worker reponde (port 10250)
+    - name: Wait for the worker's kubelet to respond (port 10250)
       wait_for:
         port: 10250
         host: "{{ node_private_ip }}"
         timeout: 120
 
 # ------------------------------------------------------------
-# Play 4 : Verification finale depuis le premier master
+# Play 4: Final check from the first master
 # ------------------------------------------------------------
-- name: Verifier l'etat final du cluster
+- name: Check the final state of the cluster
   hosts: "{{ groups['master'][0] }}"
   become: yes
   vars:
     kube_user: "ubuntu"
 
   tasks:
-    - name: Attendre que tous les noeuds soient enregistres et Ready
+    - name: Wait for all nodes to be registered and Ready
       command: kubectl get nodes --no-headers
       register: all_nodes
       retries: 15
@@ -297,13 +297,13 @@
       environment:
         KUBECONFIG: /home/{{ kube_user }}/.kube/config
 
-    - name: Lister tous les noeuds du cluster (3 masters + 3 workers attendus)
+    - name: List all the cluster nodes (3 masters + 3 workers expected)
       command: kubectl get nodes -o wide
       register: final_nodes
       changed_when: false
       environment:
         KUBECONFIG: /home/{{ kube_user }}/.kube/config
 
-    - name: Afficher le resultat
+    - name: Display the result
       debug:
         var: final_nodes.stdout_lines
